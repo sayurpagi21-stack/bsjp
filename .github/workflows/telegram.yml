@@ -1,0 +1,24 @@
+name: BSJP Telegram
+
+on:
+  schedule:
+    # Tiap jam 09:05-16:05 WIB (02:05-09:05 UTC), Senin-Jumat
+    - cron: "5 2-9 * * 1-5"
+    # 15:30 WIB: kandidat beli sore + Entry/TP/SL
+    - cron: "30 8 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  kirim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Kirim laporan ke Telegram
+        run: python bsjp.py --telegram
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PAGES_URL: https://sayurpagi21-stack.github.io/bsjp/
