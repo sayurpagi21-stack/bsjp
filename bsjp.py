@@ -9,7 +9,7 @@ atau dari Command Prompt:  python bsjp.py
 Tutup jendela hitamnya untuk berhenti.
 Hanya pakai library bawaan Python, tidak perlu pip install.
 """
-import json, math, sys, time, threading, urllib.request, urllib.error, webbrowser
+import json, math, os, sys, time, threading, urllib.request, urllib.error, webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -546,9 +546,92 @@ def build_static(out):
     print(f"OK: {len(S['stocks'])} saham, data {datetime.fromtimestamp(S['asof'], WIB):%Y-%m-%d %H:%M} WIB, {S['fails']} gagal")
 
 
+def _rp(v):
+    return f"{v:,.0f}".replace(",", ".")
+
+
+def _pct(v, d=1):
+    return (f"{v*100:+.{d}f}%").replace(".", ",")
+
+
+def build_report():
+    """Pesan ringkasan pasar untuk Telegram (HTML)."""
+    now = datetime.now(WIB)
+    st = S["stocks"]; ih = S["ihsg"]
+    detail = now.hour == 15 and 10 <= now.minute < 50
+    closed = now.hour > 15 or (now.hour == 15 and now.minute >= 50)
+    liq = [x for x in st if x["liq"]]
+    cand = sorted([x for x in liq if x["sc"] >= 55], key=lambda x: -x["sc"])
+    data_t = datetime.fromtimestamp(S["asof"], WIB).strftime("%H:%M") if S["asof"] else "-"
+    L = []
+    if detail:
+        L.append("⏰ <b>Waktunya siap-siap beli (BSJP)</b>")
+    elif closed:
+        L.append("🔔 <b>Rekap penutupan</b>")
+    else:
+        L.append("📊 <b>Update pasar</b>")
+    L.append(f"{now:%H:%M} WIB · data Yahoo per {data_t} WIB")
+    L.append("")
+    trend = "di atas MA20 ✅" if ih["c"] >= ih["ma20"] else "di bawah MA20 ⚠️"
+    L.append(f"<b>IHSG</b> {ih['c']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+             + f" ({_pct(ih['chg'], 2)}) · {trend}")
+    L.append("")
+    if cand:
+        L.append(f"<b>Kandidat BSJP</b> (skor ≥ 55): {len(cand)}")
+        for x in cand[:5]:
+            if detail:
+                L.append(f"• <b>{x['s']}</b> {x['sc']} · {_rp(x['c'])} ({_pct(x['chg'])})\n"
+                         f"   Entry {_rp(x['c'])} · TP1 {_rp(x['tp1'])} · TP2 {_rp(x['tp2'])} · SL {_rp(x['sl'])}")
+            else:
+                L.append(f"• <b>{x['s']}</b> skor {x['sc']} · {_rp(x['c'])} ({_pct(x['chg'])})")
+    else:
+        L.append("<b>Kandidat BSJP:</b> belum ada yang skor ≥ 55.")
+        near = sorted(liq, key=lambda x: -x["sc"])[:3]
+        if near:
+            L.append("Paling dekat: " + ", ".join(f"{x['s']} {x['sc']}" for x in near))
+    movers = sorted(liq, key=lambda x: -x["chg"])
+    if movers:
+        L.append("")
+        L.append("📈 Naik: " + ", ".join(f"{x['s']} {_pct(x['chg'])}" for x in movers[:3]))
+        L.append("📉 Turun: " + ", ".join(f"{x['s']} {_pct(x['chg'])}" for x in movers[::-1][:3]))
+    if detail and cand:
+        L.append("")
+        L.append("Cek harga di Stockbit dulu. Lewati kalau sudah > +1% dari Entry.")
+    if closed and cand:
+        L.append("")
+        L.append("Besok 08:45 pasang antrean jual di TP1/TP2. Buka di bawah SL → cut loss.")
+    url = os.environ.get("PAGES_URL", "")
+    if url:
+        L.append("")
+        L.append(f'<a href="{url}">Buka BSJP Radar</a> · ketik kode saham (mis. BBCA) untuk analisis')
+    L.append("<i>Alat bantu analisis, bukan saran investasi.</i>")
+    return "\n".join(L)
+
+
+def send_telegram(text):
+    token = os.environ["TELEGRAM_TOKEN"]; chat = os.environ["TELEGRAM_CHAT_ID"]
+    data = json.dumps({"chat_id": chat, "text": text, "parse_mode": "HTML",
+                       "disable_web_page_preview": True}).encode("utf-8")
+    req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def telegram_report():
+    run_scan(True)
+    if not S["stocks"]:
+        print("Gagal: tidak ada data dari Yahoo.", S["msg"]); sys.exit(1)
+    msg = build_report()
+    res = send_telegram(msg)
+    print("Terkirim" if res.get("ok") else f"Gagal kirim: {res}")
+
+
 def main():
     if len(sys.argv) > 2 and sys.argv[1] == "--static":
         return build_static(sys.argv[2])
+    if len(sys.argv) > 1 and sys.argv[1] == "--telegram":
+        return telegram_report()
     print("=" * 60)
     print("  BSJP Radar - Beli Sore Jual Pagi")
     print(f"  Buka di laptop : http://localhost:{PORT}")
