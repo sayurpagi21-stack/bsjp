@@ -2,11 +2,16 @@ name: BSJP Telegram
 
 on:
   schedule:
-    # Tiap jam 09:05-16:05 WIB (02:05-09:05 UTC), Senin-Jumat
+    - cron: "20 1 * * 1-5"
+    - cron: "40 2 * * 1-5"
     - cron: "5 2-9 * * 1-5"
-    # 15:30 WIB: kandidat beli sore + Entry/TP/SL
     - cron: "30 8 * * 1-5"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "auto / pagi / cek / jam"
+        required: false
+        default: "auto"
 
 jobs:
   kirim:
@@ -17,7 +22,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Kirim laporan ke Telegram
-        run: python bsjp.py --telegram
+        run: python bsjp.py --telegram ${{ github.event.inputs.mode || 'auto' }}
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
